@@ -1,21 +1,34 @@
 import("stdfaust.lib");
 
-process = kick, rumble, clap, bass, stars, waah :> ef.cubicnl(0.1,0) <:_,_ ;
+process = kick, rumble, clap, bass, stars, waah, chords, tic :> ef.cubicnl(0.1,0) <:_,_ ;
 
 //simple
 //======
 
-bass = (os.osc(fr)+os.osc(fr*2)+os.osc(fr*3)*0.5)*gate*0.1*amp with{
+bass = (os.osc(fr)+os.osc(fr*2)*0.6+os.osc(fr*3)*0.3)*gate*0.2*amp with{
     fr = ba.midikey2hz(ba.hz2midikey(80)+(bar%4==2)*0.5);
-    gate = ((bar>7)|(loop>0)):ba.line(15);
+    gate = ((bar>7)|(loop>0)):ba.line(15) -((loop==3)*(bar==7)):ba.line(15);
     //sidechain -->
         amp = 1- en.ar(0.01,0.15,trig);
         trig = (clock!=clock')*ba.selectn(16,clock,list);
         list = 3,0,0,0, 3,0,0,0, 3,0,0,0, 3,0,0,0;
 };
 
+chords = os.sawtooth(ba.midikey2hz(freq1+12+3.5)),
+        os.sawtooth(ba.midikey2hz(freq2+12+3.5)),
+        os.sawtooth(ba.midikey2hz(freq3+12+3.5)) :> _*0.8*mute : fi.lowpass(2,600):ef.cubicnl(0.1,0)*0.1:fi.resonhp(800,3,1) with{
+    freq1 = ba.selectn(8,bar%8,39,41,40,39,46,41,39,40);
+    freq2 = ba.selectn(8,bar%8,43,44,43,44,48,48,46,44);
+    freq3 = ba.selectn(8,bar%8,48,48,49,48,52,51,50,49);
+    mute = loop>2;
+};
+
 //sound engines
 //=============
+
+ticGen(val) = rPulse(val):fi.resonbp(2560,80,0.2) with{
+rPulse(r) = ba.pulse((no.noise:ba.latch(ba.pulse(3000))*0.5+1.1)*(1-r)*40000+1500);
+};
 
 waahGen(gr) = (os.sawtooth(80+gro*120)*gro) +
             (no.noise*(0.9*gro+0.1)) :
@@ -52,9 +65,15 @@ noiseGen(gate,fr,q) = no.noise:fi.resonbp(fr,q,amp):ef.cubicnl(0.1,0) with{
 //instruments
 //===========
 
+tic = ticGen(val)*mute with{
+    val = (bar-4)/12:ba.line(200)+rand*0.5;
+    rand = no.noise*0.5+0.5:ba.sAndH(ba.pulse((60/Tempo/2)*ma.SR)):ba.line(60/Tempo/2);
+    mute = (loop==2)*(bar>3);
+};
+
 waah = waahGen(grog)*mute*0.1 with{
     grog = no.noise*0.5+0.5:ba.sAndH(ba.pulse((60/Tempo/2)*ma.SR)):ba.line(60/Tempo/2);
-    mute = (loop==1) * (bar>7) : ba.line(15);
+    mute = (loop>0)*(bar>7)*(loop%2==1):ba.line(15) + (loop==4)*(bar>7):ba.line(15);
 };
 
 stars = simpleSynth(gate,freq)*mute :fx : fi.resonlp(2000,3,0.4) with{
@@ -63,19 +82,19 @@ stars = simpleSynth(gate,freq)*mute :fx : fi.resonlp(2000,3,0.4) with{
     list0 = (clock!=clock')*ba.selectn(16,clock,640,0,0,0, 0,0,0,0, 640,0,0,0, 0,0,0,0);
     list1 = (clock!=clock')*ba.selectn(16,clock,640,0,720+(bar%4==2)*15,0, 0,680-(bar%4==2)*25,0,0, 640,0,0,0, 0,666-(bar%4==3)*666,0,0);
     freq = val:ba.sAndH(gate);
-    mute = ((bar>3):ba.line(ma.SR*8)*(loop==0)*(bar<8))+(loop==1);
+    mute = ((bar>3):ba.line(ma.SR*8)*(loop==0)*(bar<8))+(loop==1)+(loop==4);
     fx = _<:_*mute,(_*(1-mute):ef.echo(0.05,0.05,0.9*(1-mute))):>_;
 };
 
 kick = kickGen(gate)*mute*1.2 with{
     gate = (clock!=clock')*ba.selectn(16,clock,list);
     list = 6,0,0,0, 5,0,0,0, 6,0,0,0, 4,0,0,0;
-    mute = (bar>7)|(loop>0) -(loop==3);
+    mute = (bar>7)|(loop>0) -((loop==3)*(bar<8));
 };
 
-rumble = rumbleGen(val)*amp with{
+rumble = rumbleGen(val)*amp*1.2 with{
     val = 100 - ((loop>0)|(bar>3))*33.33:ba.line(ma.SR*60*16/Tempo) +5*(bar%4==2)*(loop>1);
-    amp = 1:ba.line(ma.SR*60*8/Tempo) -ba.line(15,loop>0) +ba.line(15,loop>1) ;
+    amp = 1:ba.line(ma.SR*60*8/Tempo) -ba.line(15,loop>0) +ba.line(15,loop>1) -ba.line(15,(loop==3)*(bar<8)) ;
 };
 
 clap = noiseGen(gate,500,3)+@(noiseGen(gate,500,3),del) : _*0.2*mute : fx with{
@@ -84,7 +103,7 @@ clap = noiseGen(gate,500,3)+@(noiseGen(gate,500,3),del) : _*0.2*mute : fx with{
     br = 3*(loop==0)*(bar==15) + 3*(loop==0)*(bar==7) ; //break
     del = int(0.01*ma.SR);
     fx = _ <: fi.resonhp(15000-(14900:ba.line(ma.SR*8)),4,1)*(loop==0)*(bar<8), _*((bar>7)|(loop>0)):>_;
-    mute = 1 -(loop==3);
+    mute = 1 -((loop==3)*(bar<8));
 };
 
 //sequencer
